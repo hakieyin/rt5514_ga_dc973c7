@@ -50,13 +50,13 @@ static const struct snd_pcm_hardware rt5514_spi_pcm_hardware = {
 	.info			= SNDRV_PCM_INFO_MMAP |
 				  SNDRV_PCM_INFO_MMAP_VALID |
 				  SNDRV_PCM_INFO_INTERLEAVED,
-	.formats		= SNDRV_PCM_FMTBIT_S16_LE,
+	.formats		= SNDRV_PCM_FMTBIT_S32_LE,
 	.period_bytes_min	= PAGE_SIZE,
 	.period_bytes_max	= 0x20000 / 8,
 	.periods_min		= 8,
 	.periods_max		= 8,
-	.channels_min		= 1,
-	.channels_max		= 1,
+	.channels_min		= 2,
+	.channels_max		= 2,
 	.buffer_bytes_max	= 0x20000,
 };
 
@@ -65,10 +65,10 @@ static struct snd_soc_dai_driver rt5514_spi_dai = {
 	.id = 0,
 	.capture = {
 		.stream_name = "DSP Capture",
-		.channels_min = 1,
-		.channels_max = 1,
+		.channels_min = 2,
+		.channels_max = 2,
 		.rates = SNDRV_PCM_RATE_16000,
-		.formats = SNDRV_PCM_FMTBIT_S16_LE,
+		.formats = SNDRV_PCM_FMTBIT_S32_LE,
 	},
 };
 
