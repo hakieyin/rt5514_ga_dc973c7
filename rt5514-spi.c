@@ -39,11 +39,13 @@ static struct spi_device *rt5514_spi;
 
 struct rt5514_dsp {
 	struct device *dev;
-	struct delayed_work copy_work;
+	struct delayed_work start_work, copy_work;
 	struct mutex dma_lock;
 	struct snd_pcm_substream *substream;
-	unsigned int buf_base, buf_limit, buf_rp;
+	unsigned int buf_base, buf_limit, buf_rp, time_syncing;
 	size_t buf_size, get_size, dma_offset;
+	Params_AEC AEC1, AEC2;
+	s64 ts1, ts2, ts_buf_start;
 };
 
 static const struct snd_pcm_hardware rt5514_spi_pcm_hardware = {
@@ -71,6 +73,20 @@ static struct snd_soc_dai_driver rt5514_spi_dai = {
 		.formats = SNDRV_PCM_FMTBIT_S32_LE,
 	},
 };
+
+static int rt5514_spi_time_sync(int num)
+{
+	struct snd_soc_platform *platform =
+		snd_soc_lookup_platform(&rt5514_spi->dev);
+	struct rt5514_dsp *rt5514_dsp =
+		snd_soc_platform_get_drvdata(platform);
+	u8 buf[8] = {0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00};
+
+	rt5514_dsp->time_syncing = num;
+	rt5514_spi_burst_write(0x18001014, buf, 8);
+
+	return 0;
+}
 
 static void rt5514_spi_copy_work(struct work_struct *work)
 {
@@ -104,7 +120,8 @@ static void rt5514_spi_copy_work(struct work_struct *work)
 				(cur_wp - rt5514_dsp->buf_base);
 
 		if (remain_data < period_bytes) {
-			schedule_delayed_work(&rt5514_dsp->copy_work, 5);
+			schedule_delayed_work(&rt5514_dsp->copy_work,
+				msecs_to_jiffies(50));
 			goto done;
 		}
 	}
@@ -139,7 +156,7 @@ static void rt5514_spi_copy_work(struct work_struct *work)
 
 	snd_pcm_period_elapsed(rt5514_dsp->substream);
 
-	schedule_delayed_work(&rt5514_dsp->copy_work, 5);
+	schedule_delayed_work(&rt5514_dsp->copy_work, msecs_to_jiffies(50));
 
 done:
 	mutex_unlock(&rt5514_dsp->dma_lock);
@@ -148,10 +165,30 @@ done:
 static void rt5514_schedule_copy(struct rt5514_dsp *rt5514_dsp)
 {
 	size_t period_bytes;
-	u8 buf[8];
+	u8 buf[8] = {0};
+	int ns_per_tic, buf_diff, ns_per_sample;
+	s64 ts_AEC1_wp;
+
+	rt5514_spi_burst_write(0x18002e04, buf, 8);
 
 	if (!rt5514_dsp->substream)
 		return;
+
+	rt5514_spi_time_sync(1);
+	msleep(20);
+
+	rt5514_spi_time_sync(2);
+	msleep(20);
+
+	ns_per_tic = (int)(rt5514_dsp->ts2 - rt5514_dsp->ts1) /
+		(rt5514_dsp->AEC2.RTC_Current - rt5514_dsp->AEC1.RTC_Current);
+	ns_per_sample = (ns_per_tic *
+		(rt5514_dsp->AEC1.Diff_T + rt5514_dsp->AEC2.Diff_T)) /
+		((rt5514_dsp->AEC1.Diff_WP + rt5514_dsp->AEC2.Diff_WP) / 4);
+
+	ts_AEC1_wp = rt5514_dsp->ts2 -
+		(s64)((rt5514_dsp->AEC2.RTC_Current -
+		rt5514_dsp->AEC1.RTC_BufferWP) * ns_per_tic);
 
 	period_bytes = snd_pcm_lib_period_bytes(rt5514_dsp->substream);
 	rt5514_dsp->get_size = 0;
@@ -181,20 +218,58 @@ static void rt5514_schedule_copy(struct rt5514_dsp *rt5514_dsp)
 
 	rt5514_dsp->buf_size = rt5514_dsp->buf_limit - rt5514_dsp->buf_base;
 
+	if (rt5514_dsp->buf_rp > rt5514_dsp->AEC1.WP_BufferWP)
+		buf_diff = rt5514_dsp->buf_rp - rt5514_dsp->AEC1.WP_BufferWP;
+	else
+		buf_diff = (rt5514_dsp->buf_rp - rt5514_dsp->buf_base) +
+			(rt5514_dsp->buf_limit - rt5514_dsp->AEC1.WP_BufferWP);
+
+	rt5514_dsp->ts_buf_start = ts_AEC1_wp -
+		(((s64)(rt5514_dsp->buf_size - buf_diff) / 8) * ns_per_sample);
+
 	if (rt5514_dsp->buf_size % period_bytes)
 		rt5514_dsp->buf_size = (rt5514_dsp->buf_size / period_bytes) *
 			period_bytes;
 
 	if (rt5514_dsp->buf_base && rt5514_dsp->buf_limit &&
 		rt5514_dsp->buf_rp && rt5514_dsp->buf_size)
-		schedule_delayed_work(&rt5514_dsp->copy_work, 0);
+		schedule_delayed_work(&rt5514_dsp->copy_work,
+			msecs_to_jiffies(0));
+}
+
+static void rt5514_spi_start_work(struct work_struct *work)
+{
+	struct rt5514_dsp *rt5514_dsp =
+		container_of(work, struct rt5514_dsp, start_work.work);
+
+	rt5514_schedule_copy(rt5514_dsp);
 }
 
 static irqreturn_t rt5514_spi_irq(int irq, void *data)
 {
 	struct rt5514_dsp *rt5514_dsp = data;
+	u8 buf[8] = {0};
+	s64 timestamp;
+	Params_AEC AEC;
 
-	rt5514_schedule_copy(rt5514_dsp);
+	if (rt5514_dsp->time_syncing) {
+		timestamp = ktime_get_ns();
+		rt5514_spi_burst_read(0x4ff60000, (u8 *)&AEC, sizeof(Params_AEC));
+
+		if (rt5514_dsp->time_syncing == 1) {
+			rt5514_dsp->ts1 = timestamp;
+			rt5514_dsp->AEC1 = AEC;
+			rt5514_spi_burst_write(0x18002e04, buf, 8);
+		} else {
+			rt5514_dsp->ts2 = timestamp;
+			rt5514_dsp->AEC2 = AEC;
+		}
+
+		rt5514_dsp->time_syncing = 0;
+	} else {
+		schedule_delayed_work(&rt5514_dsp->start_work,
+			msecs_to_jiffies(0));
+	}
 
 	return IRQ_HANDLED;
 }
@@ -237,12 +312,15 @@ static int rt5514_spi_hw_free(struct snd_pcm_substream *substream)
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct rt5514_dsp *rt5514_dsp =
 			snd_soc_platform_get_drvdata(rtd->platform);
+	u8 buf[8] = {0};
 
 	mutex_lock(&rt5514_dsp->dma_lock);
 	rt5514_dsp->substream = NULL;
 	mutex_unlock(&rt5514_dsp->dma_lock);
 
 	cancel_delayed_work_sync(&rt5514_dsp->copy_work);
+
+	rt5514_spi_burst_write(0x18002e04, buf, 8);
 
 	return snd_pcm_lib_free_vmalloc_buffer(substream);
 }
@@ -278,6 +356,7 @@ static int rt5514_spi_pcm_probe(struct snd_soc_platform *platform)
 	rt5514_dsp->dev = &rt5514_spi->dev;
 	mutex_init(&rt5514_dsp->dma_lock);
 	INIT_DELAYED_WORK(&rt5514_dsp->copy_work, rt5514_spi_copy_work);
+	INIT_DELAYED_WORK(&rt5514_dsp->start_work, rt5514_spi_start_work);
 	snd_soc_platform_set_drvdata(platform, rt5514_dsp);
 
 	if (rt5514_spi->irq) {

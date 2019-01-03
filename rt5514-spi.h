@@ -34,6 +34,15 @@ enum {
 	RT5514_SPI_CMD_BURST_WRITE,
 };
 
+typedef struct {
+	unsigned int RTC_Current;
+	unsigned int RTC_BufferWP;
+	unsigned int WP_BufferWP;
+	unsigned int Diff_T;
+	unsigned int Diff_WP;
+	unsigned int Dummy;
+} Params_AEC;
+
 int rt5514_spi_burst_read(unsigned int addr, u8 *rxbuf, size_t len);
 int rt5514_spi_burst_write(u32 addr, const u8 *txbuf, size_t len);
 
