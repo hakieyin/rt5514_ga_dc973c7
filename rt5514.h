@@ -272,6 +272,8 @@ struct rt5514_priv {
 	int pll_in;
 	int pll_out;
 	int dsp_enabled;
+	int dsp_idle;
+	int soc_time_sync;
 	u8 *model_buf;
 	unsigned int model_len;
 	unsigned int pll3_cal_value;

@@ -34,12 +34,14 @@
 #include <sound/tlv.h>
 
 #include "rt5514-spi.h"
+extern int dsp_idle_mode_on;
+extern int soc_time_sync;
 
 static struct spi_device *rt5514_spi;
 
 struct rt5514_dsp {
 	struct device *dev;
-	struct delayed_work start_work, copy_work;
+	struct delayed_work start_work, copy_work, time_sync;
 	struct mutex dma_lock;
 	struct snd_pcm_substream *substream;
 	unsigned int buf_base, buf_limit, buf_rp, time_syncing;
@@ -81,9 +83,12 @@ static int rt5514_spi_time_sync(int num)
 	struct rt5514_dsp *rt5514_dsp =
 		snd_soc_platform_get_drvdata(platform);
 	u8 buf[8] = {0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00};
-
-	rt5514_dsp->time_syncing = num;
-	rt5514_spi_burst_write(0x18001014, buf, 8);
+	pr_info("%s -- num:%d,dsp_idle_mode_on:%d\n", __func__,num,dsp_idle_mode_on);
+	if(!dsp_idle_mode_on){
+		rt5514_dsp->time_syncing = num;
+		rt5514_spi_burst_write(0x18001014, buf, 8);
+	} else
+		pr_info("%s -- Stop time syncing when dsp is in idle mode.\n", __func__);
 
 	return 0;
 }
@@ -237,6 +242,25 @@ static void rt5514_schedule_copy(struct rt5514_dsp *rt5514_dsp)
 			msecs_to_jiffies(0));
 }
 
+static void rt5514_schedule_time_sync(struct rt5514_dsp *rt5514_dsp)
+{
+	u8 buf[8] = {0};
+	int ns_per_tic;
+	pr_info("%s -- soc_time_sync:%d\n", __func__,soc_time_sync); 
+	rt5514_spi_burst_write(0x18002e04, buf, 8);
+
+	rt5514_spi_time_sync(1);
+	msleep(20);
+
+	rt5514_spi_time_sync(2);
+	msleep(20);
+
+	ns_per_tic = (int)(rt5514_dsp->ts2 - rt5514_dsp->ts1) /
+		(rt5514_dsp->AEC2.RTC_Current - rt5514_dsp->AEC1.RTC_Current);
+	
+	pr_info("%s -- SoC time sync done\n", __func__); 
+}
+
 static void rt5514_spi_start_work(struct work_struct *work)
 {
 	struct rt5514_dsp *rt5514_dsp =
@@ -244,6 +268,15 @@ static void rt5514_spi_start_work(struct work_struct *work)
 
 	rt5514_schedule_copy(rt5514_dsp);
 }
+
+static void rt5514_start_time_sync(struct work_struct *work)
+{
+	struct rt5514_dsp *rt5514_dsp =
+		container_of(work, struct rt5514_dsp, time_sync.work);
+
+	rt5514_schedule_time_sync(rt5514_dsp);
+}
+
 
 static irqreturn_t rt5514_spi_irq(int irq, void *data)
 {
@@ -266,7 +299,10 @@ static irqreturn_t rt5514_spi_irq(int irq, void *data)
 		}
 
 		rt5514_dsp->time_syncing = 0;
-	} else {
+	} else if(soc_time_sync){
+		schedule_delayed_work(&rt5514_dsp->time_sync,
+			msecs_to_jiffies(0));
+	} else{
 		schedule_delayed_work(&rt5514_dsp->start_work,
 			msecs_to_jiffies(0));
 	}
@@ -357,6 +393,7 @@ static int rt5514_spi_pcm_probe(struct snd_soc_platform *platform)
 	mutex_init(&rt5514_dsp->dma_lock);
 	INIT_DELAYED_WORK(&rt5514_dsp->copy_work, rt5514_spi_copy_work);
 	INIT_DELAYED_WORK(&rt5514_dsp->start_work, rt5514_spi_start_work);
+	INIT_DELAYED_WORK(&rt5514_dsp->time_sync, rt5514_start_time_sync);
 	snd_soc_platform_set_drvdata(platform, rt5514_dsp);
 
 	if (rt5514_spi->irq) {

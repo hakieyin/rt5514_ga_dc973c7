@@ -34,6 +34,10 @@
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
 #include "rt5514-spi.h"
 #endif
+int dsp_idle_mode_on = 0;
+int soc_time_sync = 0;
+EXPORT_SYMBOL(dsp_idle_mode_on);
+EXPORT_SYMBOL(soc_time_sync);
 
 static const struct reg_sequence rt5514_i2c_patch[] = {
 	{0x1800101c, 0x00000000},
@@ -237,6 +241,26 @@ static int rt5514_dsp_voice_wake_up_get(struct snd_kcontrol *kcontrol,
 
 	return 0;
 }
+static int rt5514_dsp_idle_get(struct snd_kcontrol *kcontrol,
+		struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
+	struct rt5514_priv *rt5514 = snd_soc_component_get_drvdata(component);
+
+	ucontrol->value.integer.value[0] = rt5514->dsp_idle;
+
+	return 0;
+}
+static int rt5514_soc_time_sync_get(struct snd_kcontrol *kcontrol,
+		struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
+	struct rt5514_priv *rt5514 = snd_soc_component_get_drvdata(component);
+
+	ucontrol->value.integer.value[0] = rt5514->soc_time_sync;
+
+	return 0;
+}
 
 static int rt5514_calibration(struct rt5514_priv *rt5514, bool on)
 {
@@ -399,6 +423,41 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+static int rt5514_dsp_idle_put(struct snd_kcontrol *kcontrol,
+		struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
+	struct rt5514_priv *rt5514 = snd_soc_component_get_drvdata(component);
+	
+	if (ucontrol->value.integer.value[0]){
+		rt5514->dsp_idle = dsp_idle_mode_on = 1;
+		regmap_write(rt5514->i2c_regmap, 0x18002fa0, 0x1);
+		pr_info("-- DSP Idle.\n");
+	} else{
+		rt5514->dsp_idle = dsp_idle_mode_on = 0;
+		regmap_write(rt5514->i2c_regmap, 0x18002fa0, 0x0);
+		regmap_write(rt5514->i2c_regmap, 0x18001014, 0x2);
+		pr_info("-- DSP Non-Idle.\n");
+	}
+	
+	return 0;
+}
+
+static int rt5514_soc_time_sync_put(struct snd_kcontrol *kcontrol,
+		struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
+	struct rt5514_priv *rt5514 = snd_soc_component_get_drvdata(component);
+	
+	if (ucontrol->value.integer.value[0]){
+		rt5514->soc_time_sync = soc_time_sync = 1;
+		regmap_write(rt5514->i2c_regmap, 0x18002e04, 0x1);
+	} else{
+		rt5514->soc_time_sync = soc_time_sync = 0;
+	}
+	
+	return 0;
+}
 static int rt5514_hotword_model_put(struct snd_kcontrol *kcontrol,
 		const unsigned int __user *bytes, unsigned int size)
 {
@@ -440,6 +499,10 @@ static const struct snd_kcontrol_new rt5514_snd_controls[] = {
 		rt5514_dsp_voice_wake_up_get, rt5514_dsp_voice_wake_up_put),
 	SND_SOC_BYTES_TLV("Hotword Model", 0x8504,
 		NULL, rt5514_hotword_model_put),
+	SOC_SINGLE_EXT("DSP Idle", SND_SOC_NOPM, 0, 1, 0,
+		rt5514_dsp_idle_get, rt5514_dsp_idle_put),
+	SOC_SINGLE_EXT("SoC Time Sync", SND_SOC_NOPM, 0, 1, 0,
+		rt5514_soc_time_sync_get, rt5514_soc_time_sync_put),
 };
 
 /* ADC Mixer*/
