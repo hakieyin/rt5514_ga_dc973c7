@@ -274,9 +274,12 @@ struct rt5514_priv {
 	int dsp_enabled;
 	int dsp_idle;
 	int soc_time_sync;
+	int hotword_trig;
+	int dsp_core_reset;
 	u8 *model_buf;
 	unsigned int model_len;
 	unsigned int pll3_cal_value;
 };
 
+int rt5514_dsp_reload_fw(int firmware_reload);
 #endif /* __RT5514_H__ */

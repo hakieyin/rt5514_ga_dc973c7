@@ -33,6 +33,7 @@
 #include <sound/initval.h>
 #include <sound/tlv.h>
 
+#include "rt5514.h"
 #include "rt5514-spi.h"
 extern int dsp_idle_mode_on;
 extern int soc_time_sync;
@@ -41,7 +42,7 @@ static struct spi_device *rt5514_spi;
 
 struct rt5514_dsp {
 	struct device *dev;
-	struct delayed_work start_work, copy_work, time_sync;
+	struct delayed_work start_work, copy_work, time_sync, watchdog_work;
 	struct mutex dma_lock;
 	struct snd_pcm_substream *substream;
 	unsigned int buf_base, buf_limit, buf_rp, time_syncing;
@@ -277,16 +278,38 @@ static void rt5514_start_time_sync(struct work_struct *work)
 	rt5514_schedule_time_sync(rt5514_dsp);
 }
 
+static void rt5514_watchdog_work(struct work_struct *work)
+{
+	struct rt5514_dsp *rt5514_dsp =
+		container_of(work, struct rt5514_dsp, watchdog_work.work);
+
+	pr_info("%s -- watchdog work!\n", __func__);
+	rt5514_dsp_reload_fw(0);
+	rt5514_dsp_reload_fw(1);
+}
+
 
 static irqreturn_t rt5514_spi_irq(int irq, void *data)
 {
 	struct rt5514_dsp *rt5514_dsp = data;
-	u8 buf[8] = {0};
+	unsigned int device_id,wdg_status;
+	u8 buf[8] = {0}, ret_dev_id[8] = {0},ret_wdg[8] = {0};
 	s64 timestamp;
 	Params_AEC AEC;
 
-	if (rt5514_dsp->time_syncing) {
-		timestamp = ktime_get_ns();
+	timestamp = ktime_get_ns();
+	rt5514_spi_burst_read(0x18002ff4, (u8 *)ret_dev_id, sizeof(ret_dev_id));
+	rt5514_spi_burst_read(0x18002f04, (u8 *)ret_wdg, sizeof(ret_wdg));
+	device_id = ret_dev_id[0] | ret_dev_id[1] << 8 | ret_dev_id[2] << 16 | ret_dev_id[3] << 24;
+	wdg_status = ret_wdg[0] | ret_wdg[1] << 8 | ret_wdg[2] << 16 | ret_wdg[3] << 24;
+	wdg_status = wdg_status & (0x2);
+	pr_info("%s -- device id:0x%x,wdg_status:0x%x\n", __func__,device_id,wdg_status); 
+	if((device_id != RT5514_DEVICE_ID) || (wdg_status)){
+		schedule_delayed_work(&rt5514_dsp->watchdog_work,
+				msecs_to_jiffies(0));
+	} else { 
+		if (rt5514_dsp->time_syncing) {
+			
 		rt5514_spi_burst_read(0x4ff60000, (u8 *)&AEC, sizeof(Params_AEC));
 
 		if (rt5514_dsp->time_syncing == 1) {
@@ -298,13 +321,14 @@ static irqreturn_t rt5514_spi_irq(int irq, void *data)
 			rt5514_dsp->AEC2 = AEC;
 		}
 
-		rt5514_dsp->time_syncing = 0;
-	} else if(soc_time_sync){
-		schedule_delayed_work(&rt5514_dsp->time_sync,
-			msecs_to_jiffies(0));
-	} else{
-		schedule_delayed_work(&rt5514_dsp->start_work,
-			msecs_to_jiffies(0));
+			rt5514_dsp->time_syncing = 0;
+		} else if(soc_time_sync){
+			schedule_delayed_work(&rt5514_dsp->time_sync,
+				msecs_to_jiffies(0));
+		} else{
+			schedule_delayed_work(&rt5514_dsp->start_work,
+				msecs_to_jiffies(0));
+		}
 	}
 
 	return IRQ_HANDLED;
@@ -394,6 +418,7 @@ static int rt5514_spi_pcm_probe(struct snd_soc_platform *platform)
 	INIT_DELAYED_WORK(&rt5514_dsp->copy_work, rt5514_spi_copy_work);
 	INIT_DELAYED_WORK(&rt5514_dsp->start_work, rt5514_spi_start_work);
 	INIT_DELAYED_WORK(&rt5514_dsp->time_sync, rt5514_start_time_sync);
+	INIT_DELAYED_WORK(&rt5514_dsp->watchdog_work, rt5514_watchdog_work);
 	snd_soc_platform_set_drvdata(platform, rt5514_dsp);
 
 	if (rt5514_spi->irq) {
