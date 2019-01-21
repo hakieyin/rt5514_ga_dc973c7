@@ -147,8 +147,8 @@ static void rt5514_enable_dsp_prepare(struct rt5514_priv *rt5514)
 	regmap_write(rt5514->i2c_regmap, 0x18002f08, 0x00000005);
 	/* Enable DSP clk auto switch */
 	regmap_write(rt5514->i2c_regmap, 0x18001114, 0x00000001);
-	/* Disable auto-gating function */
-	regmap_write(rt5514->i2c_regmap, 0x18001118, 0x00000000);
+	/* Reduce DSP power */
+	regmap_write(rt5514->i2c_regmap, 0x18001118, 0x00000001);
 }
 
 static bool rt5514_volatile_register(struct device *dev, unsigned int reg)
