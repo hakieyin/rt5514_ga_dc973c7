@@ -64,6 +64,7 @@
 #define RT5514_DSP_CTRL1			0x2f00
 #define RT5514_DSP_CTRL3			0x2f08
 #define RT5514_DSP_CTRL4			0x2f10
+#define RT5514_VER_CTRL				0x2fa4
 #define RT5514_VENDOR_ID1			0x2ff0
 #define RT5514_VENDOR_ID2			0x2ff4
 
@@ -273,7 +274,7 @@ struct rt5514_priv {
 	int pll_out;
 	int dsp_enabled;
 	int dsp_idle;
-	int soc_time_sync;
+	int dsp_tic_ns;
 	int hotword_trig;
 	int dsp_core_reset;
 	u8 *model_buf;

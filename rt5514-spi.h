@@ -43,6 +43,11 @@ typedef struct {
 	unsigned int Dummy;
 } Params_AEC;
 
+enum {
+	RT5514_GET_TIC_NS,
+	RT5514_SCHE_COPY,
+};
+
 int rt5514_spi_burst_read(unsigned int addr, u8 *rxbuf, size_t len);
 int rt5514_spi_burst_write(u32 addr, const u8 *txbuf, size_t len);
 
