@@ -153,15 +153,12 @@ static int rt5514_spi_time_sync(int num,int type)
 		snd_soc_platform_get_drvdata(platform);
 	int val;
 	u8 buf_sche_copy[8] = {0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00};
-	u8 buf_get_tic[8] = {0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00};
+	// u8 buf_get_tic[8] = {0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00};
 	
 	pr_info("%s -- num:%d,dsp_idle_mode_on:%d\n", __func__,num,dsp_idle_mode_on);
 	if(!dsp_idle_mode_on){
 		rt5514_dsp->time_syncing = num;
-		if(type == RT5514_GET_TIC_NS)
-			rt5514_spi_burst_write(0x18001014, buf_get_tic, 8);
-		else
-			rt5514_spi_burst_write(0x18001014, buf_sche_copy, 8);
+		rt5514_spi_burst_write(0x18001014, buf_sche_copy, 8);
 	} else
 		pr_info("%s -- Stop time syncing when dsp is in idle mode.\n", __func__);
 
@@ -320,8 +317,8 @@ static void rt5514_schedule_get_dsp_tic_ns(struct rt5514_dsp *rt5514_dsp)
 	int val,tic_per_byte;
 	u8 buf[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04};
 	
-	rt5514_spi_burst_write(0x18002074, buf, 8);
-	rt5514_spi_write_addr(0x18002074, 0x4000);
+	// rt5514_spi_burst_write(0x18002074, buf, 8);
+	rt5514_spi_write_addr(0x18002e04, 0x0);
 
 	rt5514_spi_time_sync(1,RT5514_GET_TIC_NS);
 	msleep(100);
@@ -379,32 +376,47 @@ static irqreturn_t rt5514_spi_hotword_irq(int irq, void *data)
 	Params_AEC AEC;
 	u8 ret_dev_id[8] = {0},ret_wdg[8] = {0};
 	u8 buf[8] = {0};
+	int time_sync;
 	
 	timestamp = ktime_get_ns();
 	rt5514_spi_burst_read(0x18002ff4, (u8 *)ret_dev_id, sizeof(ret_dev_id));
 	rt5514_spi_burst_read(0x18002f04, (u8 *)ret_wdg, sizeof(ret_wdg));
+	rt5514_spi_read_addr(0x18002fa8,&time_sync);
 	device_id = ret_dev_id[0] | ret_dev_id[1] << 8 | ret_dev_id[2] << 16 | ret_dev_id[3] << 24;
 	wdg_status = ret_wdg[0] | ret_wdg[1] << 8 | ret_wdg[2] << 16 | ret_wdg[3] << 24;
 	wdg_status = wdg_status & (0x2);
-	pr_info("%s -- device id:0x%x,wdg_status:0x%x\n", __func__,device_id,wdg_status); 
+	pr_info("%s -- timestamp:%llu\n", __func__,timestamp); 
+	pr_info("%s -- device id:0x%x,wdg_status:0x%x,time_sync:%d\n", __func__,device_id,wdg_status,time_sync); 
 	if((device_id != RT5514_DEVICE_ID) || (wdg_status)){
 		schedule_delayed_work(&rt5514_dsp->watchdog_work,
 				msecs_to_jiffies(0));
-	} else { 
-		if (rt5514_dsp->time_syncing) {
+	} else {
+		if(time_sync){
+			rt5514_spi_write_addr(0x18002e04, 0x0);
+			if (rt5514_dsp->time_syncing) {
 
-			rt5514_spi_burst_read(0x4ff60000, (u8 *)&AEC, sizeof(Params_AEC));
-			if (rt5514_dsp->time_syncing == 1) {
-				rt5514_dsp->ts1 = timestamp;
-				rt5514_dsp->AEC1 = AEC;
-			} else {
-				rt5514_dsp->ts2 = timestamp;
-				rt5514_dsp->AEC2 = AEC;
-			}
-				pr_info("%s -- 1\n", __func__);
-				rt5514_spi_burst_write(0x18002e04, buf, 8);
+				rt5514_spi_burst_read(0x4ff60000, (u8 *)&AEC, sizeof(Params_AEC));
+	
+				if (rt5514_dsp->time_syncing == 1) {
+					rt5514_dsp->ts1 = timestamp;
+					rt5514_dsp->AEC1 = AEC;
+					pr_info("%s(%d) -- ts1:%llu\n", __func__,__LINE__,rt5514_dsp->ts1);
+				} else {
+					rt5514_dsp->ts2 = timestamp;
+					rt5514_dsp->AEC2 = AEC;
+					pr_info("%s(%d) -- ts2:%llu\n", __func__,__LINE__,rt5514_dsp->ts2);
+					rt5514_spi_write_addr(0x18002fa8, 0x0);
+				}
+				pr_info("%s(%d) -- 1\n", __func__,__LINE__);
+				// rt5514_spi_burst_write(0x18002074, buf, 8);
 				rt5514_dsp->time_syncing = 0;
-		} else {
+			} else {
+				pr_info("%s(%d) -- 2\n", __func__,__LINE__);
+				schedule_delayed_work(&rt5514_dsp->get_dsp_tic,
+				msecs_to_jiffies(0));
+			}
+		}else{
+			pr_info("%s(%d) -- 3\n", __func__,__LINE__);
 			rt5514_spi_burst_read(0x4ff60000, (u8 *)&AEC, sizeof(Params_AEC));
 			rt5514_dsp->ts_wp_soc = timestamp;
 			rt5514_dsp->AEC_hotword = AEC;
@@ -590,6 +602,7 @@ static int rt5514_spi_pcm_probe(struct snd_soc_platform *platform)
 				"%s Failed to reguest IRQ: %d\n", __func__,
 				ret);
 	}
+	/*
 	if (gpio_time_sync) {
 		ret = devm_request_threaded_irq(&rt5514_spi->dev,
 			gpio_time_sync, NULL, rt5514_spi_time_sync_irq,
@@ -600,6 +613,7 @@ static int rt5514_spi_pcm_probe(struct snd_soc_platform *platform)
 				"%s Failed to reguest IRQ: %d\n", __func__,
 				ret);
 	}
+	*/
 #endif
 
 	return 0;

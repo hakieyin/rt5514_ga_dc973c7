@@ -34,7 +34,7 @@
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
 #include "rt5514-spi.h"
 #endif
-#define VERSION "0.0.1"
+#define VERSION "0.0.2"
 int dsp_idle_mode_on = 0;
 int dsp_tic_ns = 0;
 struct snd_soc_codec *global_codec;
@@ -604,12 +604,15 @@ static int rt5514_get_dsp_tic_ns_put(struct snd_kcontrol *kcontrol,
 	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct rt5514_priv *rt5514 = snd_soc_component_get_drvdata(component);
 	
-	if (ucontrol->value.integer.value[0]){
+	dsp_tic_ns = ucontrol->value.integer.value[0];
+	if (dsp_tic_ns){
 		msleep(1000);
-		rt5514->dsp_tic_ns = dsp_tic_ns = 1;
-		regmap_write(rt5514->i2c_regmap, 0x18002074, 0x6000);
+		rt5514->dsp_tic_ns = 1;
+		regmap_write(rt5514->i2c_regmap, 0x18002fa8, 0x1);
+		regmap_write(rt5514->i2c_regmap, 0x18002e04, 0x1);
+		pr_info("-- DSP Time Sync.\n");
 	} else{
-		rt5514->dsp_tic_ns = dsp_tic_ns = 0;
+		rt5514->dsp_tic_ns = 0;
 	}
 	
 	return 0;
@@ -650,7 +653,9 @@ static int rt5514_hotword_trigger_put(struct snd_kcontrol *kcontrol,
 	
 	if (ucontrol->value.integer.value[0]){
 		rt5514->hotword_trig = 1;
+		regmap_write(rt5514->i2c_regmap, 0x18002fa8, 0x0);
 		regmap_write(rt5514->i2c_regmap, 0x18002e04, 0x1);
+		pr_info("-- (%d)DSP hot trigger.\n",__LINE__);
 	} else{
 		rt5514->hotword_trig = 0;
 	}
