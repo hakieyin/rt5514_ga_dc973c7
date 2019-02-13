@@ -321,10 +321,11 @@ static void rt5514_schedule_get_dsp_tic_ns(struct rt5514_dsp *rt5514_dsp)
 	rt5514_spi_write_addr(0x18002e04, 0x0);
 
 	rt5514_spi_time_sync(1,RT5514_GET_TIC_NS);
-	msleep(100);
+	msleep(200);
 
 	rt5514_spi_time_sync(2,RT5514_GET_TIC_NS);
 	msleep(20);
+	rt5514_dsp->time_syncing = 0;
 
 	ns_per_tic = (int)(rt5514_dsp->ts2 - rt5514_dsp->ts1) /
 		(rt5514_dsp->AEC2.RTC_Current - rt5514_dsp->AEC1.RTC_Current);
@@ -409,7 +410,7 @@ static irqreturn_t rt5514_spi_hotword_irq(int irq, void *data)
 				}
 				pr_info("%s(%d) -- 1\n", __func__,__LINE__);
 				// rt5514_spi_burst_write(0x18002074, buf, 8);
-				rt5514_dsp->time_syncing = 0;
+				//rt5514_dsp->time_syncing = 0;
 			} else {
 				pr_info("%s(%d) -- 2\n", __func__,__LINE__);
 				schedule_delayed_work(&rt5514_dsp->get_dsp_tic,
