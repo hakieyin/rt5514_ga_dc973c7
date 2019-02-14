@@ -153,7 +153,6 @@ static int rt5514_spi_time_sync(int num,int type)
 		snd_soc_platform_get_drvdata(platform);
 	int val;
 	u8 buf_sche_copy[8] = {0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00};
-	// u8 buf_get_tic[8] = {0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00};
 	
 	pr_info("%s -- num:%d,dsp_idle_mode_on:%d\n", __func__,num,dsp_idle_mode_on);
 	if(!dsp_idle_mode_on){
@@ -317,7 +316,6 @@ static void rt5514_schedule_get_dsp_tic_ns(struct rt5514_dsp *rt5514_dsp)
 	int val,tic_per_byte;
 	u8 buf[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04};
 	
-	// rt5514_spi_burst_write(0x18002074, buf, 8);
 	rt5514_spi_write_addr(0x18002e04, 0x0);
 
 	rt5514_spi_time_sync(1,RT5514_GET_TIC_NS);
@@ -358,10 +356,6 @@ static void rt5514_get_dsp_tic_ns(struct work_struct *work)
 
 static void rt5514_watchdog_work(struct work_struct *work)
 {
-	/*
-	struct rt5514_dsp *rt5514_dsp =
-		container_of(work, struct rt5514_dsp, watchdog_work.work);
-	*/
 
 	pr_info("%s -- watchdog work!\n", __func__);
 	rt5514_dsp_reload_fw(0);
@@ -409,8 +403,6 @@ static irqreturn_t rt5514_spi_hotword_irq(int irq, void *data)
 					rt5514_spi_write_addr(0x18002fa8, 0x0);
 				}
 				pr_info("%s(%d) -- 1\n", __func__,__LINE__);
-				// rt5514_spi_burst_write(0x18002074, buf, 8);
-				//rt5514_dsp->time_syncing = 0;
 			} else {
 				pr_info("%s(%d) -- 2\n", __func__,__LINE__);
 				schedule_delayed_work(&rt5514_dsp->get_dsp_tic,

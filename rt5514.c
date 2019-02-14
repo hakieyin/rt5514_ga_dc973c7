@@ -34,7 +34,7 @@
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
 #include "rt5514-spi.h"
 #endif
-#define VERSION "0.0.2"
+#define VERSION "0.0.3"
 int dsp_idle_mode_on = 0;
 int dsp_tic_ns = 0;
 struct snd_soc_codec *global_codec;
