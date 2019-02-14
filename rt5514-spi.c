@@ -245,10 +245,10 @@ static void rt5514_schedule_copy(struct rt5514_dsp *rt5514_dsp)
 	int buf_diff_sample;
 	s64 ts_AEC1_wp;
 
-	rt5514_spi_burst_write(0x18002e04, buf, 8);
-
-	if (!rt5514_dsp->substream)
+	if (!rt5514_dsp->substream){
+		rt5514_spi_burst_write(0x18002e04, buf, 8);
 		return;
+	}
 
 	ts_AEC1_wp = rt5514_dsp->ts_wp_soc;
 
