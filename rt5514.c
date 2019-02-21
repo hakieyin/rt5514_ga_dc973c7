@@ -34,12 +34,16 @@
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
 #include "rt5514-spi.h"
 #endif
-#define VERSION "0.0.5"
+
+#define VERSION "0.0.6"
 int dsp_idle_mode_on = 0;
-int dsp_tic_ns = 0;
 struct snd_soc_codec *global_codec;
 EXPORT_SYMBOL(dsp_idle_mode_on);
-EXPORT_SYMBOL(dsp_tic_ns);
+
+static char hotword_model_name_para[256] = RT5514_FIRMWARE3;
+
+module_param_string(model_name, hotword_model_name_para, sizeof(hotword_model_name_para), 0644);
+MODULE_PARM_DESC(model_name, "dynamically load different hotword model");
 
 static const struct reg_sequence rt5514_i2c_patch[] = {
 	{0x1800101c, 0x00000000},
@@ -452,6 +456,7 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 	struct snd_soc_codec *codec = rt5514->codec;
 	const struct firmware *fw = NULL;
 	u8 buf[8];
+	int ret = 0;
 
 	if (ucontrol->value.integer.value[0] == rt5514->dsp_enabled)
 		return 0;
@@ -491,8 +496,8 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 
 			rt5514_enable_dsp_prepare(rt5514);
 
-			request_firmware(&fw, RT5514_FIRMWARE1, codec->dev);
-			if (fw) {
+			ret = request_firmware(&fw, RT5514_FIRMWARE1, codec->dev);
+			if (!ret) {
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
 				rt5514_spi_burst_write(0x4ff60000, fw->data,
 					((fw->size/8)+1)*8);
@@ -502,10 +507,12 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 #endif
 				release_firmware(fw);
 				fw = NULL;
+			} else {
+				dev_err(codec->dev, "Request firmware fail! ret=%d", ret);
 			}
 
-			request_firmware(&fw, RT5514_FIRMWARE2, codec->dev);
-			if (fw) {
+			ret = request_firmware(&fw, RT5514_FIRMWARE2, codec->dev);
+			if (!ret) {
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
 				rt5514_spi_burst_write(0x4ffc0000, fw->data,
 					((fw->size/8)+1)*8);
@@ -515,6 +522,8 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 #endif
 				release_firmware(fw);
 				fw = NULL;
+			} else {
+				dev_err(codec->dev, "Request firmware fail! ret=%d", ret);
 			}
 
 			if (rt5514->model_buf && rt5514->model_len) {
@@ -534,9 +543,11 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 					"No SPI driver for loading firmware\n");
 #endif
 			} else {
-				request_firmware(&fw, RT5514_FIRMWARE3,
+				dev_err(codec->dev, "load hotword mode %s\n", hotword_model_name_para);
+
+				ret = request_firmware(&fw, hotword_model_name_para,
 						 codec->dev);
-				if (fw) {
+				if (!ret) {
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
 					rt5514_spi_burst_write(0x4ffaf000,
 						fw->data,
@@ -547,6 +558,8 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 #endif
 					release_firmware(fw);
 					fw = NULL;
+				} else {
+					dev_err(codec->dev, "Request firmware fail! ret=%d", ret);
 				}
 			}
 
@@ -603,8 +616,8 @@ static int rt5514_get_dsp_tic_ns_put(struct snd_kcontrol *kcontrol,
 {
 	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct rt5514_priv *rt5514 = snd_soc_component_get_drvdata(component);
-	
-	dsp_tic_ns = ucontrol->value.integer.value[0];
+	int dsp_tic_ns = ucontrol->value.integer.value[0];
+
 	if (dsp_tic_ns){
 		msleep(1000);
 		rt5514->dsp_tic_ns = 1;
@@ -617,6 +630,8 @@ static int rt5514_get_dsp_tic_ns_put(struct snd_kcontrol *kcontrol,
 	
 	return 0;
 }
+
+#if 0
 static int rt5514_hotword_model_put(struct snd_kcontrol *kcontrol,
 		const unsigned int __user *bytes, unsigned int size)
 {
@@ -644,6 +659,7 @@ done:
 	rt5514->model_len = (ret ? 0 : size);
 	return ret;
 }
+#endif
 
 static int rt5514_hotword_trigger_put(struct snd_kcontrol *kcontrol,
 		struct snd_ctl_elem_value *ucontrol)
@@ -692,8 +708,8 @@ static const struct snd_kcontrol_new rt5514_snd_controls[] = {
 		adc_vol_tlv),
 	SOC_SINGLE_EXT("DSP Voice Wake Up", SND_SOC_NOPM, 0, 1, 0,
 		rt5514_dsp_voice_wake_up_get, rt5514_dsp_voice_wake_up_put),
-	SND_SOC_BYTES_TLV("Hotword Model", 0x8504,
-		NULL, rt5514_hotword_model_put),
+	//SND_SOC_BYTES_TLV("Hotword Model", 0x8504,
+	//	NULL, rt5514_hotword_model_put),
 	SOC_SINGLE_EXT("DSP Idle", SND_SOC_NOPM, 0, 1, 0,
 		rt5514_dsp_idle_get, rt5514_dsp_idle_put),
 	SOC_SINGLE_EXT("Get DSP Tic NS", SND_SOC_NOPM, 0, 1, 0,
@@ -1334,6 +1350,36 @@ static int rt5514_probe(struct snd_soc_codec *codec)
 	struct rt5514_priv *rt5514 = snd_soc_codec_get_drvdata(codec);
 	struct platform_device *pdev = container_of(codec->dev,
 						   struct platform_device, dev);
+	int ret;
+	unsigned int val = ~0;
+
+	dev_err(codec->dev, "%s codec=%p\n", __func__, codec);
+
+	/*
+	 * The rt5514 can get confused if the i2c lines glitch together, as
+	 * can happen at bootup as regulators are turned off and on.  If it's
+	 * in this glitched state the first i2c read will fail, so we'll give
+	 * it one change to retry.
+	 */
+	ret = regmap_read(rt5514->regmap, RT5514_VENDOR_ID2, &val);
+	if (ret || val != RT5514_DEVICE_ID)
+		ret = regmap_read(rt5514->regmap, RT5514_VENDOR_ID2, &val);
+	if (ret || val != RT5514_DEVICE_ID) {
+		dev_err(codec->dev,
+			"Device with ID register %x is not rt5514\n", val);
+		return -ENODEV;
+	}
+
+	ret = regmap_multi_reg_write(rt5514->i2c_regmap, rt5514_i2c_patch,
+				    ARRAY_SIZE(rt5514_i2c_patch));
+	if (ret != 0)
+		dev_warn(codec->dev, "Failed to apply i2c_regmap patch: %d\n",
+			ret);
+
+	ret = regmap_register_patch(rt5514->regmap, rt5514_patch,
+				    ARRAY_SIZE(rt5514_patch));
+	if (ret != 0)
+		dev_warn(codec->dev, "Failed to apply regmap patch: %d\n", ret);
 
 	rt5514->mclk = devm_clk_get(codec->dev, "mclk");
 	if (PTR_ERR(rt5514->mclk) == -EPROBE_DEFER)
@@ -1418,7 +1464,6 @@ static const struct regmap_config rt5514_i2c_regmap = {
 	.name = "i2c",
 	.reg_bits = 32,
 	.val_bits = 32,
-
 	.cache_type = REGCACHE_NONE,
 };
 
@@ -1466,11 +1511,12 @@ static ssize_t rt5514_i2c_version_show(struct device *dev,
 	struct i2c_client *client = to_i2c_client(dev);
 	struct rt5514_priv *rt5514 = i2c_get_clientdata(client);
 	unsigned int value = 0, ret;
-	int i,count = 0;
+	int count = 0;
+
 	regcache_cache_bypass(rt5514->regmap, true);
 	ret = regmap_read(rt5514->regmap, RT5514_VER_CTRL, &value);
-	count += sprintf(buf + count, "Firmware Version: %08x\n",value);
-	count += sprintf(buf + count, "Driver Version: %s\n",VERSION);
+	count += sprintf(buf + count, "Firmware Version: %08x\n", value);
+	count += sprintf(buf + count, "Driver Version: %s\n", VERSION);
 	regcache_cache_bypass(rt5514->regmap, false);
 	return count;
 }
@@ -1509,7 +1555,6 @@ static int rt5514_i2c_probe(struct i2c_client *i2c,
 	struct rt5514_platform_data *pdata = dev_get_platdata(&i2c->dev);
 	struct rt5514_priv *rt5514;
 	int ret;
-	unsigned int val = ~0;
 
 	rt5514 = devm_kzalloc(&i2c->dev, sizeof(struct rt5514_priv),
 				GFP_KERNEL);
@@ -1539,6 +1584,7 @@ static int rt5514_i2c_probe(struct i2c_client *i2c,
 		return ret;
 	}
 
+#if 0
 	/*
 	 * The rt5514 can get confused if the i2c lines glitch together, as
 	 * can happen at bootup as regulators are turned off and on.  If it's
@@ -1564,7 +1610,8 @@ static int rt5514_i2c_probe(struct i2c_client *i2c,
 				    ARRAY_SIZE(rt5514_patch));
 	if (ret != 0)
 		dev_warn(&i2c->dev, "Failed to apply regmap patch: %d\n", ret);
-	
+#endif
+
 	ret = device_create_file(&i2c->dev, &dev_attr_rt5514_version);
 	if (ret < 0)
 		printk("failed to add rt5514_version sysfs files\n");
