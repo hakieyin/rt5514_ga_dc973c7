@@ -34,6 +34,9 @@
 #include <sound/initval.h>
 #include <sound/tlv.h>
 
+#include <linux/input.h>
+#include <linux/wakelock.h>
+
 #include "rt5514.h"
 #include "rt5514-spi.h"
 
@@ -61,6 +64,9 @@ struct rt5514_dsp {
 	size_t buf_size, get_size, dma_offset;
 	Params_AEC AEC1, AEC2,AEC_hotword;
 	s64 ts1, ts2, ts_buf_start,ts_wp_soc;
+	struct wake_lock wake_lock;
+	struct input_dev *input_dev;
+	struct delayed_work wake_work;
 };
 
 int rt5514_spi_read_addr(unsigned int addr, unsigned int *val)
@@ -345,7 +351,7 @@ static void rt5514_schedule_copy(struct rt5514_dsp *rt5514_dsp)
 static void rt5514_schedule_get_dsp_tic_ns(struct rt5514_dsp *rt5514_dsp)
 {
 	int tic_per_byte, dmic_l_val,dmic_r_val,dmic_l_mute,dmic_r_mute;
-	
+
 	rt5514_spi_write_addr(0x18002e04, 0x0);
 
 	/* Mute dmic during calculate dsp ti ns */
@@ -376,7 +382,7 @@ static void rt5514_schedule_get_dsp_tic_ns(struct rt5514_dsp *rt5514_dsp)
 		(rt5514_dsp->AEC1.Diff_WP + rt5514_dsp->AEC2.Diff_WP);
 
 	tic_per_sample = tic_per_byte * 4;
-	
+
 	pr_info("%s(): tic_per_byte:%d,tic_per_sample:%d\n", __func__,tic_per_byte,tic_per_sample);
 	pr_info("%s(): ns_per_tic:%d,ns_per_sample:%d\n", __func__,ns_per_tic,ns_per_sample);
 
@@ -456,10 +462,32 @@ static void rt5514_helper(struct rt5514_dsp *rt5514_dsp)
 			rt5514_spi_burst_read(0x4ff60000, (u8 *)&AEC, sizeof(Params_AEC));
 			rt5514_dsp->ts_wp_soc = timestamp;
 			rt5514_dsp->AEC_hotword = AEC;
+
+			schedule_delayed_work(&rt5514_dsp->wake_work, 0);
+
 			schedule_delayed_work(&rt5514_dsp->start_work,
 			msecs_to_jiffies(0));
 		}
 	}
+}
+
+static void rt5514_wake_work(struct work_struct *work)
+{
+	struct rt5514_dsp *rt5514_dsp =
+		container_of(work, struct rt5514_dsp, wake_work.work);
+
+	if (!wake_lock_active(&(rt5514_dsp->wake_lock)))
+		wake_lock_timeout(&(rt5514_dsp->wake_lock), msecs_to_jiffies(100*HZ));
+
+	dev_info(&rt5514_spi->dev, "%s Send key event\n", __func__);
+
+	input_report_key(rt5514_dsp->input_dev, 116, 1);
+	input_sync(rt5514_dsp->input_dev);
+
+	msleep(80);
+
+	input_report_key(rt5514_dsp->input_dev, 116, 0);
+	input_sync(rt5514_dsp->input_dev);
 }
 
 static irqreturn_t rt5514_spi_hotword_irq(int irq, void *data)
@@ -571,15 +599,16 @@ static int rt5514_spi_pcm_probe(struct snd_soc_platform *platform)
 	INIT_DELAYED_WORK(&rt5514_dsp->start_work, rt5514_spi_start_work);
 	INIT_DELAYED_WORK(&rt5514_dsp->get_dsp_tic, rt5514_get_dsp_tic_ns);
 	INIT_DELAYED_WORK(&rt5514_dsp->watchdog_work, rt5514_watchdog_work);
+	INIT_DELAYED_WORK(&rt5514_dsp->wake_work, rt5514_wake_work);
 	snd_soc_platform_set_drvdata(platform, rt5514_dsp);
-	
+
 	np = of_find_compatible_node(NULL, NULL, "realtek,rt5514-spi");
 	if (!np){
 		dev_err(&rt5514_spi->dev,
 				"%s DTS compatible node not found!\n", __func__);
 		return -1;
 	}
-	
+
 	ret = rt5514_parse_irq(np);
 	if(ret){
 		dev_err(&rt5514_spi->dev,
@@ -597,6 +626,27 @@ static int rt5514_spi_pcm_probe(struct snd_soc_platform *platform)
 			dev_err(&rt5514_spi->dev,
 				"%s Failed to reguest IRQ: %d\n", __func__,
 				ret);
+	}
+
+	wake_lock_init(&rt5514_dsp->wake_lock, WAKE_LOCK_SUSPEND, "hotwordtrigger");
+
+	rt5514_dsp->input_dev = input_allocate_device();
+	if (rt5514_dsp->input_dev) {
+		struct input_dev *input = rt5514_dsp->input_dev;
+
+		input->name = "hotword-trigger-key";
+		input->id.bustype = BUS_HOST;
+		input->id.vendor = 0x0001;
+		input->id.product = 0x0001;
+		input->id.version = 0x0001;
+		__set_bit(116, input->keybit);
+		__set_bit(EV_KEY, input->evbit);
+
+		ret = input_register_device(input);
+		if(ret) {
+			dev_err(&rt5514_spi->dev, "input allocate device fail.\n");
+			input_free_device(input);
+		}
 	}
 
 	atomic_set(&is_spi_ready, 1);

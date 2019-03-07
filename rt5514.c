@@ -35,7 +35,7 @@
 #include "rt5514-spi.h"
 #endif
 
-#define VERSION "0.0.6"
+#define VERSION "0.0.7"
 int dsp_idle_mode_on = 0;
 struct snd_soc_codec *global_codec;
 EXPORT_SYMBOL(dsp_idle_mode_on);
@@ -714,7 +714,7 @@ static const struct snd_kcontrol_new rt5514_snd_controls[] = {
 		rt5514_dsp_idle_get, rt5514_dsp_idle_put),
 	SOC_SINGLE_EXT("Get DSP Tic NS", SND_SOC_NOPM, 0, 1, 0,
 		rt5514_get_dsp_tic_ns_get, rt5514_get_dsp_tic_ns_put),
-	SOC_SINGLE_EXT("Hotword Tigger", SND_SOC_NOPM, 0, 1, 0,
+	SOC_SINGLE_EXT("Hotword Trigger", SND_SOC_NOPM, 0, 1, 0,
 		rt5514_hotword_trigger_get, rt5514_hotword_trigger_put),
 	SOC_SINGLE_EXT("DSP Core Reset", SND_SOC_NOPM, 0, 1, 0,
 		rt5514_dsp_core_reset_get, rt5514_dsp_core_reset_put),
