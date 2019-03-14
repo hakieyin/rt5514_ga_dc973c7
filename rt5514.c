@@ -35,7 +35,7 @@
 #include "rt5514-spi.h"
 #endif
 
-#define VERSION "0.0.7"
+#define VERSION "0.0.8"
 int dsp_idle_mode_on = 0;
 struct snd_soc_codec *global_codec;
 EXPORT_SYMBOL(dsp_idle_mode_on);
@@ -46,26 +46,43 @@ module_param_string(model_name, hotword_model_name_para, sizeof(hotword_model_na
 MODULE_PARM_DESC(model_name, "dynamically load different hotword model");
 
 static const struct reg_sequence rt5514_i2c_patch[] = {
-	{0x1800101c, 0x00000000},
-	{0x18001100, 0x0000031f},
+	{0xfafafafa, 0x00000001},
+	{0x18002000, 0x000010ec},
+	{0xfafafafa, 0x00000001},
+	{0x18002004, 0x00808F81},
+	{0xfafafafa, 0x00000001},
+	{0x18002f08, 0x00000006},
+	{0xfafafafa, 0x00000001},
+	{0x18002f10, 0x00000000},
+	{0xfafafafa, 0x00000001},
+	{0x18002f10, 0x00000001},
+	{0xfafafafa, 0x00000000},
 	{0x18001104, 0x00000007},
 	{0x18001108, 0x00000000},
 	{0x1800110c, 0x00000000},
-	{0x18001110, 0x00000000},
-	{0x18001114, 0x00000001},
-	{0x18001118, 0x00000000},
-	{0x18002f08, 0x00000006},
-	{0x18002f00, 0x00055149},
-	{0x18002f00, 0x0005514b},
-	{0x18002f00, 0x00055149},
-	{0xfafafafa, 0x00000001},
-	{0x18002f10, 0x00000001},
-	{0x18002f10, 0x00000000},
-	{0x18002f10, 0x00000001},
-	{0xfafafafa, 0x00000001},
-	{0x18002000, 0x000010ec},
-	{0xfafafafa, 0x00000000},
+	{0x18001100, 0x0000031f},
+	{0x180014c8, 0x00000001},
 };
+
+static void rt5514_reset(struct rt5514_priv *rt5514)
+{
+	regmap_write(rt5514->i2c_regmap, 0xfafafafa, 0x00000001);
+	regmap_write(rt5514->i2c_regmap, 0x18002000, 0x000010ec);
+	regmap_write(rt5514->i2c_regmap, 0xfafafafa, 0x00000001);
+	regmap_write(rt5514->i2c_regmap, 0x18002004, 0x00808F81);
+	regmap_write(rt5514->i2c_regmap, 0xfafafafa, 0x00000001);
+	regmap_write(rt5514->i2c_regmap, 0x18002f08, 0x00000006);
+	regmap_write(rt5514->i2c_regmap, 0xfafafafa, 0x00000001);
+	regmap_write(rt5514->i2c_regmap, 0x18002f10, 0x00000000);
+	regmap_write(rt5514->i2c_regmap, 0xfafafafa, 0x00000001);
+	regmap_write(rt5514->i2c_regmap, 0x18002f10, 0x00000001);
+	regmap_write(rt5514->i2c_regmap, 0xfafafafa, 0x00000000);
+	regmap_write(rt5514->i2c_regmap, 0x18001104, 0x00000007);
+	regmap_write(rt5514->i2c_regmap, 0x18001108, 0x00000000);
+	regmap_write(rt5514->i2c_regmap, 0x1800110c, 0x00000000);
+	regmap_write(rt5514->i2c_regmap, 0x18001100, 0x0000031f);
+	regmap_write(rt5514->i2c_regmap, 0x180014c8, 0x00000001);
+}
 
 static const struct reg_sequence rt5514_patch[] = {
 	{RT5514_DIG_IO_CTRL,		0x00000040},
@@ -133,7 +150,7 @@ static void rt5514_enable_dsp_prepare(struct rt5514_priv *rt5514)
 	/* Reset */
 	regmap_write(rt5514->i2c_regmap, 0x18002000, 0x000010ec);
 	/* LDO_I_limit */
-	regmap_write(rt5514->i2c_regmap, 0x18002200, 0x00028604);
+	regmap_write(rt5514->i2c_regmap, 0x18002200, 0x00028704);
 	/* I2C bypass enable */
 	regmap_write(rt5514->i2c_regmap, 0xfafafafa, 0x00000001);
 	/* mini-core reset */
@@ -389,7 +406,7 @@ int rt5514_dsp_reload_fw(int firmware_reload)
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
 				int ret;
 
-				ret = rt5514_spi_burst_write(0x4ffaf000,
+				ret = rt5514_spi_burst_write(0x4ffad000,
 					rt5514->model_buf,
 					((rt5514->model_len / 8) + 1) * 8);
 				if (ret) {
@@ -406,7 +423,7 @@ int rt5514_dsp_reload_fw(int firmware_reload)
 						 global_codec->dev);
 				if (fw) {
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
-					rt5514_spi_burst_write(0x4ffaf000,
+					rt5514_spi_burst_write(0x4ffad000,
 						fw->data,
 						((fw->size/8)+1)*8);
 #else
@@ -530,7 +547,7 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
 				int ret;
 
-				ret = rt5514_spi_burst_write(0x4ffaf000,
+				ret = rt5514_spi_burst_write(0x4ffad000,
 					rt5514->model_buf,
 					((rt5514->model_len / 8) + 1) * 8);
 				if (ret) {
@@ -549,7 +566,7 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 						 codec->dev);
 				if (!ret) {
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
-					rt5514_spi_burst_write(0x4ffaf000,
+					rt5514_spi_burst_write(0x4ffad000,
 						fw->data,
 						((fw->size/8)+1)*8);
 #else
@@ -1361,6 +1378,7 @@ static int rt5514_probe(struct snd_soc_codec *codec)
 	 * in this glitched state the first i2c read will fail, so we'll give
 	 * it one change to retry.
 	 */
+	rt5514_reset(rt5514);
 	ret = regmap_read(rt5514->regmap, RT5514_VENDOR_ID2, &val);
 	if (ret || val != RT5514_DEVICE_ID)
 		ret = regmap_read(rt5514->regmap, RT5514_VENDOR_ID2, &val);
