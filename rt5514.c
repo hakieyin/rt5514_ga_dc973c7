@@ -406,7 +406,7 @@ int rt5514_dsp_reload_fw(int firmware_reload)
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
 				int ret;
 
-				ret = rt5514_spi_burst_write(0x4ffad000,
+				ret = rt5514_spi_burst_write(0x4ffaf000,
 					rt5514->model_buf,
 					((rt5514->model_len / 8) + 1) * 8);
 				if (ret) {
@@ -423,7 +423,7 @@ int rt5514_dsp_reload_fw(int firmware_reload)
 						 global_codec->dev);
 				if (fw) {
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
-					rt5514_spi_burst_write(0x4ffad000,
+					rt5514_spi_burst_write(0x4ffaf000,
 						fw->data,
 						((fw->size/8)+1)*8);
 #else
@@ -547,7 +547,7 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
 				int ret;
 
-				ret = rt5514_spi_burst_write(0x4ffad000,
+				ret = rt5514_spi_burst_write(0x4ffaf000,
 					rt5514->model_buf,
 					((rt5514->model_len / 8) + 1) * 8);
 				if (ret) {
@@ -566,7 +566,7 @@ static int rt5514_dsp_voice_wake_up_put(struct snd_kcontrol *kcontrol,
 						 codec->dev);
 				if (!ret) {
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
-					rt5514_spi_burst_write(0x4ffad000,
+					rt5514_spi_burst_write(0x4ffaf000,
 						fw->data,
 						((fw->size/8)+1)*8);
 #else
