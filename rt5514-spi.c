@@ -313,7 +313,6 @@ static void rt5514_schedule_copy(struct rt5514_dsp *rt5514_dsp)
 		sizeof(buf));
 	rt5514_dsp->buf_rp = buf[0] | buf[1] << 8 | buf[2] << 16 |
 				buf[3] << 24;
-	rt5514_dsp->buf_rp = rt5514_dsp->buf_rp + RECORD_SHIFT;
 
 	/* To avoid rp out of valid memory region */
 	if (rt5514_dsp->buf_rp + RECORD_SHIFT <= rt5514_dsp->buf_limit) {
