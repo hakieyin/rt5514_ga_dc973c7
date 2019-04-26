@@ -35,13 +35,12 @@
 #include "rt5514-spi.h"
 #endif
 
-#define VERSION "0.0.10"
+#define VERSION "0.0.11"
 int dsp_idle_mode_on = 0;
 struct snd_soc_codec *global_codec;
 EXPORT_SYMBOL(dsp_idle_mode_on);
 
 static char hotword_model_name_para[256] = RT5514_FIRMWARE3;
-
 module_param_string(model_name, hotword_model_name_para, sizeof(hotword_model_name_para), 0644);
 MODULE_PARM_DESC(model_name, "dynamically load different hotword model");
 
@@ -410,7 +409,7 @@ static int rt5514_dsp_enable(struct rt5514_priv *rt5514)
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
 		int ret;
 
-		ret = rt5514_spi_burst_write(0x4ffaf000, rt5514->model_buf,
+		ret = rt5514_spi_burst_write(0x4ffad000, rt5514->model_buf,
 			((rt5514->model_len / 8) + 1) * 8);
 		if (ret) {
 			dev_err(codec->dev, "Model load failed %d\n", ret);
@@ -425,7 +424,7 @@ static int rt5514_dsp_enable(struct rt5514_priv *rt5514)
 		ret = request_firmware(&fw, hotword_model_name_para, codec->dev);
 		if (!ret) {
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
-			rt5514_spi_burst_write(0x4ffaf000, fw->data, ((fw->size/8)+1)*8);
+			rt5514_spi_burst_write(0x4ffad000, fw->data, ((fw->size/8)+1)*8);
 #else
 			dev_err(codec->dev, "No SPI driver to load fw\n");
 #endif
@@ -612,9 +611,11 @@ static int rt5514_irq_reset_put(struct snd_kcontrol *kcontrol,
 	struct rt5514_priv *rt5514 = snd_soc_component_get_drvdata(component);
 
 	rt5514->irq_reset = ucontrol->value.integer.value[0];
-	if (rt5514->irq_reset){
+	if (rt5514->irq_reset) {
 		rt5514_set_irq_low();
 		pr_info("IRQ reset\n");
+
+		rt5514_hotdet(1);
 	}
 
 	return 0;
