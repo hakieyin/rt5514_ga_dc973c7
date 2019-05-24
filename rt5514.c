@@ -35,7 +35,7 @@
 #include "rt5514-spi.h"
 #endif
 
-#define VERSION "0.0.12"
+#define VERSION "0.0.13"
 int dsp_idle_mode_on = 0;
 struct snd_soc_codec *global_codec;
 EXPORT_SYMBOL(dsp_idle_mode_on);
@@ -160,8 +160,8 @@ static void rt5514_enable_dsp_prepare(struct rt5514_priv *rt5514)
 	regmap_write(rt5514->i2c_regmap, 0xfafafafa, 0x00000000);
 	/* PIN config */
 	regmap_write(rt5514->i2c_regmap, 0x18002070, 0x00000040);
-	/* PLL3(QN)=RCOSC*(10+2) */
-	regmap_write(rt5514->i2c_regmap, 0x18002240, 0x0000000a);
+	/* PLL3(QN)=RCOSC*(24+2) */
+	regmap_write(rt5514->i2c_regmap, 0x18002240, 0x00000018);
 	/* PLL3 source=RCOSC, fsi=rt_clk */
 	regmap_write(rt5514->i2c_regmap, 0x18002100, 0x0000000b);
 	/* Power on RCOSC, pll3 */
@@ -170,8 +170,8 @@ static void rt5514_enable_dsp_prepare(struct rt5514_priv *rt5514)
 	regmap_write(rt5514->i2c_regmap, 0x18002f08, 0x00000005);
 	/* Enable DSP clk auto switch */
 	regmap_write(rt5514->i2c_regmap, 0x18001114, 0x00000001);
-	/* Reduce DSP power */
-	regmap_write(rt5514->i2c_regmap, 0x18001118, 0x00000001);
+	/* Disable auto gate function */
+	regmap_write(rt5514->i2c_regmap, 0x18001118, 0x00000000);
 }
 
 static bool rt5514_volatile_register(struct device *dev, unsigned int reg)
@@ -428,7 +428,7 @@ static int rt5514_dsp_enable(struct rt5514_priv *rt5514)
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
 		int ret;
 
-		ret = rt5514_spi_burst_write(0x4ffad000, rt5514->model_buf,
+		ret = rt5514_spi_burst_write(0x4ffab000, rt5514->model_buf,
 			((rt5514->model_len / 8) + 1) * 8);
 		if (ret) {
 			dev_err(codec->dev, "Model load failed %d\n", ret);
@@ -443,7 +443,7 @@ static int rt5514_dsp_enable(struct rt5514_priv *rt5514)
 		ret = request_firmware(&fw, hotword_model_name_para, codec->dev);
 		if (!ret) {
 #if IS_ENABLED(CONFIG_SND_SOC_RT5514_SPI)
-			rt5514_spi_burst_write(0x4ffad000, fw->data, ((fw->size/8)+1)*8);
+			rt5514_spi_burst_write(0x4ffab000, fw->data, ((fw->size/8)+1)*8);
 #else
 			dev_err(codec->dev, "No SPI driver to load fw\n");
 #endif
