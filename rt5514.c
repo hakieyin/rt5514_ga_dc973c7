@@ -35,7 +35,7 @@
 #include "rt5514-spi.h"
 #endif
 
-#define VERSION "0.0.14"
+#define VERSION "0.0.15"
 int dsp_idle_mode_on = 0;
 struct snd_soc_codec *global_codec;
 EXPORT_SYMBOL(dsp_idle_mode_on);
@@ -664,6 +664,10 @@ static int rt5514_sw_boost_put(struct snd_kcontrol *kcontrol,
 }
 
 static const struct snd_kcontrol_new rt5514_snd_controls[] = {
+	SOC_SINGLE("DownFilter0 LCH Switch", RT5514_DOWNFILTER0_CTRL1,
+		RT5514_AD_AD_MUTE_BIT, 1, 1),
+	SOC_SINGLE("DownFilter0 RCH Switch", RT5514_DOWNFILTER0_CTRL2,
+		RT5514_AD_AD_MUTE_BIT, 1, 1),
 	SOC_DOUBLE_TLV("MIC Boost Volume", RT5514_ANA_CTRL_MICBST,
 		RT5514_SEL_BSTL_SFT, RT5514_SEL_BSTR_SFT, 8, 0, bst_tlv),
 	SOC_DOUBLE_R_TLV("ADC1 Capture Volume", RT5514_DOWNFILTER0_CTRL1,
