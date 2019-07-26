@@ -26,13 +26,16 @@
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
 
+#include <linux/wakelock.h>
 #include "rt5514.h"
 #include "rt5514-spi.h"
 
 #define RECORD_SHIFT  16000
+#define KEY_WAKEUP    143   //define KEY_WAKEUP for lower power on linkportable
 
 static atomic_t is_spi_ready = ATOMIC_INIT(0);
 
+static struct wake_lock dsp_lock;
 extern int dsp_idle_mode_on;
 
 static struct spi_device *rt5514_spi;
@@ -512,14 +515,15 @@ static void rt5514_wake_work(struct work_struct *work)
 		container_of(work, struct rt5514_dsp, wake_work.work);
 
 	dev_info(&rt5514_spi->dev, "%s Send key event\n", __func__);
-
-	input_report_key(rt5514_dsp->input_dev, 116, 1);
+	wake_lock_timeout(&dsp_lock, msecs_to_jiffies(10*HZ));
+	input_report_key(rt5514_dsp->input_dev, KEY_WAKEUP, 1);
 	input_sync(rt5514_dsp->input_dev);
 
-	msleep(80);
+	msleep(500);
 
-	input_report_key(rt5514_dsp->input_dev, 116, 0);
+	input_report_key(rt5514_dsp->input_dev, KEY_WAKEUP, 0);
 	input_sync(rt5514_dsp->input_dev);
+	dev_info(&rt5514_spi->dev, "%s Send key event\n", __func__);
 }
 
 static irqreturn_t rt5514_spi_hotword_irq(int irq, void *data)
@@ -672,13 +676,13 @@ static int rt5514_spi_pcm_probe(struct snd_soc_platform *platform)
 	rt5514_dsp->input_dev = input_allocate_device();
 	if (rt5514_dsp->input_dev) {
 		struct input_dev *input = rt5514_dsp->input_dev;
-
+		wake_lock_init(&dsp_lock, WAKE_LOCK_SUSPEND, "dsptrigger");
 		input->name = "hotword-trigger-key";
 		input->id.bustype = BUS_HOST;
 		input->id.vendor = 0x0001;
 		input->id.product = 0x0001;
 		input->id.version = 0x0001;
-		__set_bit(116, input->keybit);
+		__set_bit(143, input->keybit);
 		__set_bit(EV_KEY, input->evbit);
 
 		ret = input_register_device(input);
