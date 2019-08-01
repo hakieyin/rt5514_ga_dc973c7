@@ -208,11 +208,13 @@
 
 /*  RT5514_DOWNFILTER_CTRL (0x2190 0x2194 0x21a0 0x21a4) */
 #define RT5514_AD_DMIC_MIX			(0x1 << 11)
+#define RT5514_AD_DMIC_MIX_UNMUTE		(0x0 << 11)
 #define RT5514_AD_DMIC_MIX_BIT			11
 #define RT5514_AD_AD_MIX			(0x1 << 10)
 #define RT5514_AD_AD_MIX_BIT			10
 #define RT5514_D0_LRCH_BOOST_SFT		8
 #define RT5514_AD_AD_MUTE			(0x1 << 7)
+#define RT5514_AD_AD_UNMUTE			(0x0 << 7)
 #define RT5514_AD_AD_MUTE_BIT			7
 #define RT5514_AD_GAIN_MASK			(0x3f << 1)
 #define RT5514_AD_GAIN_SFT			1
@@ -284,6 +286,7 @@ struct rt5514_priv {
 	int dsp_core_reset;
 	int irq_reset;
 	int sw_boost;
+	int dsp_mute;
 	u8 *model_buf;
 	unsigned int model_len;
 	unsigned int pll3_cal_value;

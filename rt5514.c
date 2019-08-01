@@ -35,7 +35,7 @@
 #include "rt5514-spi.h"
 #endif
 
-#define VERSION "0.0.15"
+#define VERSION "0.0.16"
 int dsp_idle_mode_on = 0;
 struct snd_soc_codec *global_codec;
 EXPORT_SYMBOL(dsp_idle_mode_on);
@@ -179,6 +179,8 @@ static bool rt5514_volatile_register(struct device *dev, unsigned int reg)
 	switch (reg) {
 	case RT5514_VENDOR_ID1:
 	case RT5514_VENDOR_ID2:
+       case RT5514_DOWNFILTER0_CTRL1:
+       case RT5514_DOWNFILTER0_CTRL2:
 		return true;
 
 	default:
@@ -274,6 +276,23 @@ static int rt5514_dsp_voice_wake_up_get(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+static int rt5514_dsp_mute_get(struct snd_kcontrol *kcontrol,
+		struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
+	struct rt5514_priv *rt5514 = snd_soc_component_get_drvdata(component);
+	int value;
+	regmap_read(rt5514->regmap, RT5514_DOWNFILTER0_CTRL1, &value);
+	value = (value >> 7) & 0x1;
+	if(value == 0)
+		ucontrol->value.integer.value[0] = 1;
+	else
+		ucontrol->value.integer.value[0] = 0;
+	
+
+	return 0;
+}
+
 static int rt5514_hotword_trigger_get(struct snd_kcontrol *kcontrol,
 		struct snd_ctl_elem_value *ucontrol)
 {
@@ -362,6 +381,40 @@ static int rt5514_calibration(struct rt5514_priv *rt5514, bool on)
 			0x4);
 	}
 
+	return 0;
+}
+
+static const char *rt5514_dsp_mute[] = {
+	"Mute", "Unmute"
+};
+
+static const SOC_ENUM_SINGLE_DECL(rt5514_dsp_mute_enum, 0, 0,
+	rt5514_dsp_mute);
+
+static int rt5514_dsp_mute_put(struct snd_kcontrol *kcontrol,
+		struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
+	struct rt5514_priv *rt5514 = snd_soc_component_get_drvdata(component);
+	struct snd_soc_codec *codec = rt5514->codec;
+
+	rt5514->dsp_mute = ucontrol->value.integer.value[0];
+	
+	if(rt5514->dsp_mute == 0){
+		regmap_update_bits(rt5514->regmap, RT5514_DOWNFILTER0_CTRL1, 
+			RT5514_AD_AD_MUTE,RT5514_AD_AD_MUTE);
+		regmap_update_bits(rt5514->regmap, RT5514_DOWNFILTER0_CTRL2, 
+			RT5514_AD_AD_MUTE,RT5514_AD_AD_MUTE);
+	}
+	else{
+		regmap_update_bits(rt5514->regmap, RT5514_DOWNFILTER0_CTRL1, 
+			RT5514_AD_AD_MUTE | RT5514_AD_DMIC_MIX,
+			RT5514_AD_AD_UNMUTE | RT5514_AD_DMIC_MIX_UNMUTE);
+		regmap_update_bits(rt5514->regmap, RT5514_DOWNFILTER0_CTRL2, 
+			RT5514_AD_AD_MUTE | RT5514_AD_DMIC_MIX,
+			RT5514_AD_AD_UNMUTE | RT5514_AD_DMIC_MIX_UNMUTE);
+	}
+	
 	return 0;
 }
 
@@ -664,10 +717,6 @@ static int rt5514_sw_boost_put(struct snd_kcontrol *kcontrol,
 }
 
 static const struct snd_kcontrol_new rt5514_snd_controls[] = {
-	SOC_SINGLE("DownFilter0 LCH Switch", RT5514_DOWNFILTER0_CTRL1,
-		RT5514_AD_AD_MUTE_BIT, 1, 1),
-	SOC_SINGLE("DownFilter0 RCH Switch", RT5514_DOWNFILTER0_CTRL2,
-		RT5514_AD_AD_MUTE_BIT, 1, 1),
 	SOC_DOUBLE_TLV("MIC Boost Volume", RT5514_ANA_CTRL_MICBST,
 		RT5514_SEL_BSTL_SFT, RT5514_SEL_BSTR_SFT, 8, 0, bst_tlv),
 	SOC_DOUBLE_R_TLV("ADC1 Capture Volume", RT5514_DOWNFILTER0_CTRL1,
@@ -696,6 +745,8 @@ static const struct snd_kcontrol_new rt5514_snd_controls[] = {
 		rt5514_dsp_core_reset_get, rt5514_dsp_core_reset_put),
 	SOC_SINGLE_EXT("Reset Irq", SND_SOC_NOPM, 0, 1, 0,
 		rt5514_irq_reset_get, rt5514_irq_reset_put),
+	SOC_ENUM_EXT("DSP Mute Control", rt5514_dsp_mute_enum, rt5514_dsp_mute_get,
+		rt5514_dsp_mute_put),
 };
 
 /* ADC Mixer*/
