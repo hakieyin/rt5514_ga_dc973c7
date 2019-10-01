@@ -17,6 +17,7 @@
 
 #define RT5514_DEVICE_ID			0x10ec5514
 
+#define RT5514_COUNTER			0x1204
 #define RT5514_RESET				0x2000
 #define RT5514_PWR_ANA1				0x2004
 #define RT5514_PWR_ANA2				0x2008
@@ -293,4 +294,5 @@ struct rt5514_priv {
 };
 
 int rt5514_dsp_reload_fw(int firmware_reload);
+unsigned int rt5514_read_counter(void);
 #endif /* __RT5514_H__ */

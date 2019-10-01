@@ -35,7 +35,7 @@
 #include "rt5514-spi.h"
 #endif
 
-#define VERSION "0.0.16"
+#define VERSION "0.1.17"
 int dsp_idle_mode_on = 0;
 struct snd_soc_codec *global_codec;
 EXPORT_SYMBOL(dsp_idle_mode_on);
@@ -96,6 +96,7 @@ static const struct reg_sequence rt5514_patch[] = {
 };
 
 static const struct reg_default rt5514_reg[] = {
+	{RT5514_COUNTER,		0x00000000},
 	{RT5514_RESET,			0x00000000},
 	{RT5514_PWR_ANA1,		0x00808880},
 	{RT5514_PWR_ANA2,		0x00220000},
@@ -191,6 +192,7 @@ static bool rt5514_volatile_register(struct device *dev, unsigned int reg)
 static bool rt5514_readable_register(struct device *dev, unsigned int reg)
 {
 	switch (reg) {
+	case RT5514_COUNTER:
 	case RT5514_RESET:
 	case RT5514_PWR_ANA1:
 	case RT5514_PWR_ANA2:
@@ -288,7 +290,6 @@ static int rt5514_dsp_mute_get(struct snd_kcontrol *kcontrol,
 		ucontrol->value.integer.value[0] = 1;
 	else
 		ucontrol->value.integer.value[0] = 0;
-	
 
 	return 0;
 }
@@ -399,22 +400,22 @@ static int rt5514_dsp_mute_put(struct snd_kcontrol *kcontrol,
 	struct snd_soc_codec *codec = rt5514->codec;
 
 	rt5514->dsp_mute = ucontrol->value.integer.value[0];
-	
+
 	if(rt5514->dsp_mute == 0){
-		regmap_update_bits(rt5514->regmap, RT5514_DOWNFILTER0_CTRL1, 
+		regmap_update_bits(rt5514->regmap, RT5514_DOWNFILTER0_CTRL1,
 			RT5514_AD_AD_MUTE,RT5514_AD_AD_MUTE);
-		regmap_update_bits(rt5514->regmap, RT5514_DOWNFILTER0_CTRL2, 
+		regmap_update_bits(rt5514->regmap, RT5514_DOWNFILTER0_CTRL2,
 			RT5514_AD_AD_MUTE,RT5514_AD_AD_MUTE);
 	}
 	else{
-		regmap_update_bits(rt5514->regmap, RT5514_DOWNFILTER0_CTRL1, 
+		regmap_update_bits(rt5514->regmap, RT5514_DOWNFILTER0_CTRL1,
 			RT5514_AD_AD_MUTE | RT5514_AD_DMIC_MIX,
 			RT5514_AD_AD_UNMUTE | RT5514_AD_DMIC_MIX_UNMUTE);
-		regmap_update_bits(rt5514->regmap, RT5514_DOWNFILTER0_CTRL2, 
+		regmap_update_bits(rt5514->regmap, RT5514_DOWNFILTER0_CTRL2,
 			RT5514_AD_AD_MUTE | RT5514_AD_DMIC_MIX,
 			RT5514_AD_AD_UNMUTE | RT5514_AD_DMIC_MIX_UNMUTE);
 	}
-	
+
 	return 0;
 }
 
@@ -530,6 +531,18 @@ static void rt5514_dsp_disable(struct rt5514_priv *rt5514)
 		rt5514_i2c_patch, ARRAY_SIZE(rt5514_i2c_patch));
 	regcache_mark_dirty(rt5514->regmap);
 	regcache_sync(rt5514->regmap);
+}
+
+unsigned int rt5514_read_counter(void)
+{
+	struct rt5514_priv *rt5514 = snd_soc_codec_get_drvdata(global_codec);
+	unsigned int cnt = 0;
+
+	regcache_cache_bypass(rt5514->regmap, true);
+	regmap_read(rt5514->regmap, RT5514_COUNTER, &cnt);
+	regcache_cache_bypass(rt5514->regmap, false);
+
+	return cnt;
 }
 
 int rt5514_dsp_reload_fw(int firmware_reload)

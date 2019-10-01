@@ -206,6 +206,35 @@ static int timestamp_get(char *val, const struct kernel_param *kp)
 	return param_get_ullong(val, kp);
 }
 
+static int raw_counter_read_handler(char *buf, const struct kernel_param *kp)
+{
+  /*
+   * 1. Read monotonic timestamp
+   * 2. Read 0x18001204
+   * 3. Read monotonic timestamp
+   */
+
+	u64 t1 = 0;
+	u64 t2 = 0;
+	unsigned int cnt = 0;
+
+	t1 = ktime_get_ns();
+	cnt = rt5514_read_counter();
+	t2 = ktime_get_ns();
+
+	memset(buf, 0x00, 128);
+	sprintf(buf, "%llu, %u, %llu", t1, cnt, t2);
+
+	return strlen(buf);
+}
+
+static const struct kernel_param_ops raw_counter_op_ops = {
+	.set = NULL,
+	.get = raw_counter_read_handler
+};
+module_param_cb(raw_counter, &raw_counter_op_ops, NULL, S_IRUGO);
+MODULE_PARM_DESC(raw_counter, "monotonic timestamp (us or ns) before I2C transaction, DSP counter content, monotonic timestamp (us or ns) after I2C transaction");
+
 static int rt5514_spi_time_sync(int num,int type)
 {
 	struct snd_soc_platform *platform =
