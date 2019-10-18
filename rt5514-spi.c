@@ -34,6 +34,7 @@
 #define KEY_WAKEUP    143   //define KEY_WAKEUP for lower power on linkportable
 
 static atomic_t is_spi_ready = ATOMIC_INIT(0);
+static atomic_t is_skip_irq = ATOMIC_INIT(0);
 
 static struct wake_lock dsp_lock;
 extern int dsp_idle_mode_on;
@@ -206,6 +207,42 @@ static int timestamp_get(char *val, const struct kernel_param *kp)
 	return param_get_ullong(val, kp);
 }
 
+#if 1
+static int raw_counter_read_handler(char *buf, const struct kernel_param *kp)
+{
+  /*
+   * 1. Read monotonic timestamp
+   * 2. Read 0x4ff60000
+   * 3. Read monotonic timestamp
+   */
+
+	unsigned int cnt = 0;
+	u64 t1 = 0;
+	u64 t2 = 0;
+	Params_AEC aec;
+	u8 buf_sche_copy[8] = {0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00};
+
+	atomic_set(&is_skip_irq, 1);
+
+	t1 = ktime_get_ns();
+	rt5514_spi_burst_write(0x18001014, buf_sche_copy, 8);
+	t2 = ktime_get_ns();
+
+	rt5514_spi_burst_read(0x4ff60000, (u8 *)&aec, sizeof(Params_AEC));
+	rt5514_spi_read_addr(0x18001204, &cnt);
+
+	pr_info("[J]%lu, %lu, %lu, %llu\n", cnt, aec.RTC_Cur_Upper, aec.RTC_Current, ns_per_tic*aec.RTC_Current);
+
+	memset(buf, 0x00, 128);
+	sprintf(buf, "%llu, %lu%lu, %llu", t1, aec.RTC_Cur_Upper, aec.RTC_Current, t2);
+
+	atomic_set(&is_skip_irq, 0);
+
+	return strlen(buf);
+}
+#endif
+
+#if 0
 static int raw_counter_read_handler(char *buf, const struct kernel_param *kp)
 {
   /*
@@ -219,14 +256,17 @@ static int raw_counter_read_handler(char *buf, const struct kernel_param *kp)
 	unsigned int cnt = 0;
 
 	t1 = ktime_get_ns();
-	cnt = rt5514_read_counter();
+	rt5514_spi_read_addr(0x18001204, &cnt);
 	t2 = ktime_get_ns();
 
 	memset(buf, 0x00, 128);
 	sprintf(buf, "%llu, %u, %llu", t1, cnt, t2);
 
+	pr_info("[J]%s\n", buf);
+
 	return strlen(buf);
 }
+#endif
 
 static const struct kernel_param_ops raw_counter_op_ops = {
 	.set = NULL,
@@ -565,6 +605,8 @@ static irqreturn_t rt5514_spi_hotword_irq(int irq, void *data)
 
 	if (atomic_read(&is_spi_ready) == 0) {
 		pr_info("%s Skip, wait spi driver resume\n", __func__);
+	} else if (atomic_read(&is_skip_irq) == 1) {
+		pr_info("%s Skip, read counter\n", __func__);
 	} else {
 		rt5514_helper(rt5514_dsp);
 	}
