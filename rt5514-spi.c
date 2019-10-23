@@ -27,6 +27,7 @@
 #include <sound/soc.h>
 
 #include <linux/wakelock.h>
+#include <linux/math64.h>
 #include "rt5514.h"
 #include "rt5514-spi.h"
 
@@ -34,7 +35,6 @@
 #define KEY_WAKEUP    143   //define KEY_WAKEUP for lower power on linkportable
 
 static atomic_t is_spi_ready = ATOMIC_INIT(0);
-static atomic_t is_skip_irq = ATOMIC_INIT(0);
 
 static struct wake_lock dsp_lock;
 extern int dsp_idle_mode_on;
@@ -42,6 +42,7 @@ extern int dsp_idle_mode_on;
 static struct spi_device *rt5514_spi;
 static int gpio_hotword;
 static int ns_per_tic,ns_per_sample,tic_per_sample;
+static unsigned long ps_tic;
 
 static bool hot_en = 1;
 module_param(hot_en, bool, 0664);
@@ -57,7 +58,7 @@ struct rt5514_dsp {
 	unsigned int buf_base, buf_limit, buf_rp, time_syncing;
 	size_t buf_size, get_size, dma_offset;
 	Params_AEC AEC1, AEC2,AEC_hotword;
-	s64 ts1, ts2, ts_buf_start,ts_wp_soc;
+	u64 ts1, ts2, ts_buf_start, ts_wp_soc;
 	struct input_dev *input_dev;
 	struct delayed_work wake_work;
 };
@@ -207,66 +208,53 @@ static int timestamp_get(char *val, const struct kernel_param *kp)
 	return param_get_ullong(val, kp);
 }
 
-#if 1
 static int raw_counter_read_handler(char *buf, const struct kernel_param *kp)
 {
-  /*
-   * 1. Read monotonic timestamp
-   * 2. Read 0x4ff60000
-   * 3. Read monotonic timestamp
-   */
+	/*
+	 * 1. Read monotonic timestamp
+	 * 2. Read 0x4ff60000
+	 * 3. Read monotonic timestamp
+	 */
 
 	unsigned int cnt = 0;
 	u64 t1 = 0;
 	u64 t2 = 0;
+	u64 t_dsp = 0;
+	u64 cur_tick = 0;
 	Params_AEC aec;
 	u8 buf_sche_copy[8] = {0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00};
 
-	atomic_set(&is_skip_irq, 1);
+	/* don’t trigger IRQ to host */
+	rt5514_spi_write_addr(0x18001028, 0x0);
 
+	/* Record current system time */
 	t1 = ktime_get_ns();
+
+	/* Ask DSP to store the current tick to Params_AEC */
 	rt5514_spi_burst_write(0x18001014, buf_sche_copy, 8);
+
+	/* Record current system time */
 	t2 = ktime_get_ns();
 
+	/* enable irq*/
+	rt5514_spi_write_addr(0x18001028, 0x1);
+
+	/* Fetch the Params_AEC to get the counter */
 	rt5514_spi_burst_read(0x4ff60000, (u8 *)&aec, sizeof(Params_AEC));
-	rt5514_spi_read_addr(0x18001204, &cnt);
 
-	pr_info("[J]%lu, %lu, %lu, %llu\n", cnt, aec.RTC_Cur_Upper, aec.RTC_Current, ns_per_tic*aec.RTC_Current);
+	/* current tick = high 32bit + low 32bit*/
+	cur_tick = (u64)(((u64)aec.RTC_Cur_Upper << 32) | ((u64)aec.RTC_Current));
+
+	/* Time of DSP (ns) = current tick * ps/tick * ns/ps */
+	t_dsp = div_u64((ps_tic * cur_tick), 1000);
+
+	pr_info("up=%lu, low=%lu, --> %llu t_dsp=%llu, ps_tic=%lu\n", aec.RTC_Cur_Upper, aec.RTC_Current, cur_tick, t_dsp, ps_tic);
 
 	memset(buf, 0x00, 128);
-	sprintf(buf, "%llu, %lu%lu, %llu", t1, aec.RTC_Cur_Upper, aec.RTC_Current, t2);
-
-	atomic_set(&is_skip_irq, 0);
+	sprintf(buf, "%llu, %llu, %llu", t1, t_dsp, t2);
 
 	return strlen(buf);
 }
-#endif
-
-#if 0
-static int raw_counter_read_handler(char *buf, const struct kernel_param *kp)
-{
-  /*
-   * 1. Read monotonic timestamp
-   * 2. Read 0x18001204
-   * 3. Read monotonic timestamp
-   */
-
-	u64 t1 = 0;
-	u64 t2 = 0;
-	unsigned int cnt = 0;
-
-	t1 = ktime_get_ns();
-	rt5514_spi_read_addr(0x18001204, &cnt);
-	t2 = ktime_get_ns();
-
-	memset(buf, 0x00, 128);
-	sprintf(buf, "%llu, %u, %llu", t1, cnt, t2);
-
-	pr_info("[J]%s\n", buf);
-
-	return strlen(buf);
-}
-#endif
 
 static const struct kernel_param_ops raw_counter_op_ops = {
 	.set = NULL,
@@ -447,6 +435,21 @@ static void rt5514_schedule_copy(struct rt5514_dsp *rt5514_dsp)
 			msecs_to_jiffies(0));
 }
 
+static unsigned long rt5514_cal_ps_per_tick(struct rt5514_dsp *rt5514_dsp)
+{
+	u32 tick_diff = (rt5514_dsp->AEC2.RTC_Current - rt5514_dsp->AEC1.RTC_Current);
+	u64 ns_diff = (rt5514_dsp->ts2 - rt5514_dsp->ts1);
+	u64 result = div_u64(ns_diff * 1000, tick_diff);
+
+	if (1) {
+		pr_info("%s Dsp Counter %lu - %lu = %lu\n", __func__, rt5514_dsp->AEC2.RTC_Current, rt5514_dsp->AEC1.RTC_Current, tick_diff);
+		pr_info("%s Sys Time %llu - %llu = %llu\n", __func__, rt5514_dsp->ts2, rt5514_dsp->ts1, ns_diff);
+		pr_info("%s Result = %llu\n", __func__, result);
+	}
+
+	return (u32) result;
+}
+
 static void rt5514_schedule_get_dsp_tic_ns(struct rt5514_dsp *rt5514_dsp)
 {
 	int tic_per_byte, dmic_l_val,dmic_r_val,dmic_l_mute,dmic_r_mute;
@@ -462,6 +465,9 @@ static void rt5514_schedule_get_dsp_tic_ns(struct rt5514_dsp *rt5514_dsp)
 	rt5514_spi_write_addr(0x18002194, dmic_r_mute);
 	/* Mute dmic during calculate dsp ti ns */
 
+	/* enable IRQ to host */
+	rt5514_spi_write_addr(0x18001028, 0x1);
+
 	rt5514_spi_time_sync(1,RT5514_GET_TIC_NS);
 	msleep(100);
 
@@ -473,6 +479,8 @@ static void rt5514_schedule_get_dsp_tic_ns(struct rt5514_dsp *rt5514_dsp)
 	ns_per_tic = (int)(rt5514_dsp->ts2 - rt5514_dsp->ts1) /
 		(rt5514_dsp->AEC2.RTC_Current - rt5514_dsp->AEC1.RTC_Current);
 
+	ps_tic = rt5514_cal_ps_per_tick(rt5514_dsp);
+
 	ns_per_sample = (ns_per_tic *
 		(rt5514_dsp->AEC1.Diff_T + rt5514_dsp->AEC2.Diff_T)) /
 		((rt5514_dsp->AEC1.Diff_WP + rt5514_dsp->AEC2.Diff_WP) / 4);
@@ -482,8 +490,8 @@ static void rt5514_schedule_get_dsp_tic_ns(struct rt5514_dsp *rt5514_dsp)
 
 	tic_per_sample = tic_per_byte * 4;
 
-	pr_info("%s(): tic_per_byte:%d,tic_per_sample:%d\n", __func__,tic_per_byte,tic_per_sample);
-	pr_info("%s(): ns_per_tic:%d,ns_per_sample:%d\n", __func__,ns_per_tic,ns_per_sample);
+	pr_info("%s(): tic_per_byte:%d,tic_per_sample:%d\n", __func__, tic_per_byte, tic_per_sample);
+	pr_info("%s(): ns_per_tic:%d,ns_per_sample:%d, ps_tic:%lu\n", __func__,ns_per_tic, ns_per_sample, ps_tic);
 
 	/* Unmute dmic */
 	rt5514_spi_write_addr(0x18002190, dmic_l_val);
@@ -518,7 +526,7 @@ static void rt5514_watchdog_work(struct work_struct *work)
 static void rt5514_helper(struct rt5514_dsp *rt5514_dsp)
 {
 	unsigned int device_id,wdg_status;
-	s64 timestamp;
+	u64 timestamp;
 	Params_AEC AEC;
 	u8 ret_dev_id[8] = {0}, ret_wdg[8] = {0};
 
@@ -605,8 +613,6 @@ static irqreturn_t rt5514_spi_hotword_irq(int irq, void *data)
 
 	if (atomic_read(&is_spi_ready) == 0) {
 		pr_info("%s Skip, wait spi driver resume\n", __func__);
-	} else if (atomic_read(&is_skip_irq) == 1) {
-		pr_info("%s Skip, read counter\n", __func__);
 	} else {
 		rt5514_helper(rt5514_dsp);
 	}

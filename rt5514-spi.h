@@ -34,17 +34,6 @@ enum {
 	RT5514_SPI_CMD_BURST_WRITE,
 };
 
-#if 0
-typedef struct {
-	unsigned int RTC_Current;
-	unsigned int RTC_BufferWP;
-	unsigned int WP_BufferWP;
-	unsigned int Diff_T;
-	unsigned int Diff_WP;
-	unsigned int Dummy;
-} Params_AEC;
-#endif
-
 typedef struct
 {
   unsigned long RTC_Current;
